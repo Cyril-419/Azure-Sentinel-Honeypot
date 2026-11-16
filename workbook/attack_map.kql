@@ -1,0 +1,16 @@
+// Attack map query - used by workbook/attack_map_workbook.json.
+// If the workbook import doesn't work, paste this into a new workbook
+// query step and set Visualization = Map (steps in docs/SETUP.md).
+SecurityEvent
+| where EventID == 4625
+| where IpAddress !in ("-", "", "127.0.0.1", "::1")
+| summarize FailedLogons = count() by IpAddress
+| extend Geo = geo_info_from_ip_address(IpAddress)
+| extend
+    Latitude  = toreal(Geo.latitude),
+    Longitude = toreal(Geo.longitude),
+    Country   = tostring(Geo.country),
+    City      = tostring(Geo.city)
+| where isnotnull(Latitude) and isnotnull(Longitude)
+| extend Label = strcat(City, ", ", Country, " (", IpAddress, ")")
+| project IpAddress, Label, Country, City, Latitude, Longitude, FailedLogons

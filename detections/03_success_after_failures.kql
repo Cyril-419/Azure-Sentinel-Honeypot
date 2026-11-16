@@ -1,0 +1,36 @@
+// =====================================================================
+// Rule: Successful logon from an IP that was just failing
+// MITRE ATT&CK: T1110 (Brute Force) leading to T1078 (Valid Accounts)
+// Severity: High - this is the one that means an attacker may be IN
+// Schedule: run every 10 minutes, look back 1 hour
+//
+// Network (3) and RDP (10) logons only, so local/service logons on the
+// VM itself don't trigger it.
+// =====================================================================
+let lookback = 1h;
+let failureThreshold = 5;
+let failures =
+    SecurityEvent
+    | where TimeGenerated > ago(lookback)
+    | where EventID == 4625
+    | where isnotempty(IpAddress) and IpAddress !in ("-", "127.0.0.1", "::1")
+    | summarize
+        Failures     = count(),
+        FirstFailure = min(TimeGenerated),
+        LastFailure  = max(TimeGenerated),
+        AccountsTried = make_set(TargetUserName, 25)
+        by IpAddress;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID == 4624                     // An account was successfully logged on
+| where LogonType in (3, 10)                // 3 = network, 10 = RDP
+| where isnotempty(IpAddress) and IpAddress !in ("-", "127.0.0.1", "::1")
+| join kind=inner failures on IpAddress
+| where Failures >= failureThreshold
+    and TimeGenerated > FirstFailure        // the success came after the failures started
+| extend Geo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(Geo.country), City = tostring(Geo.city)
+| project SuccessTime = TimeGenerated, IpAddress, Country, City, Computer,
+          LoggedOnAs = TargetUserName, LogonType, Failures,
+          FirstFailure, LastFailure, AccountsTried
+| order by SuccessTime desc

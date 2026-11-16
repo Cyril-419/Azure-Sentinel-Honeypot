@@ -1,0 +1,112 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "## Honeypot attack map\nFailed logons (Event ID 4625) against the honeypot VM, located with `geo_info_from_ip_address()`."
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "b1d3f0a2-0000-4000-8000-000000000001",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 259200000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 259200000
+                },
+                {
+                  "durationMs": 604800000
+                }
+              ],
+              "allowCustom": true
+            },
+            "label": "Time range"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityEvent\n| where EventID == 4625\n| where IpAddress !in (\"-\", \"\", \"127.0.0.1\", \"::1\")\n| summarize [\"Failed logons\"] = count(), [\"Unique attackers\"] = dcount(IpAddress), [\"Usernames tried\"] = dcount(TargetUserName)",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "tiles",
+        "tileSettings": {
+          "showBorder": false
+        }
+      },
+      "name": "summary"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityEvent\n| where EventID == 4625\n| where IpAddress !in (\"-\", \"\", \"127.0.0.1\", \"::1\")\n| summarize FailedLogons = count() by IpAddress\n| extend Geo = geo_info_from_ip_address(IpAddress)\n| extend\n    Latitude  = toreal(Geo.latitude),\n    Longitude = toreal(Geo.longitude),\n    Country   = tostring(Geo.country),\n    City      = tostring(Geo.city)\n| where isnotnull(Latitude) and isnotnull(Longitude)\n| extend Label = strcat(City, \", \", Country, \" (\", IpAddress, \")\")\n| project IpAddress, Label, Country, City, Latitude, Longitude, FailedLogons",
+        "size": 1,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "map",
+        "mapSettings": {
+          "locInfo": "LatLong",
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "sizeSettings": "FailedLogons",
+          "sizeAggregation": "Sum",
+          "labelSettings": "Label",
+          "legendMetric": "FailedLogons",
+          "legendAggregation": "Sum",
+          "itemColorSettings": {
+            "type": "heatmap",
+            "colorAggregation": "Sum",
+            "nodeColorField": "FailedLogons",
+            "heatmapPalette": "greenRed"
+          }
+        }
+      },
+      "name": "attack-map"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityEvent\n| where EventID == 4625\n| where IpAddress !in (\"-\", \"\", \"127.0.0.1\", \"::1\")\n| summarize Attempts = count() by TargetUserName\n| top 15 by Attempts",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart"
+      },
+      "name": "top-usernames"
+    }
+  ],
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

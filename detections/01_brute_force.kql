@@ -1,0 +1,28 @@
+// =====================================================================
+// Rule: RDP / SMB brute force - many failed logons from one IP
+// MITRE ATT&CK: T1110.001 (Brute Force: Password Guessing)
+// Severity: Medium
+// Schedule: run every 5 minutes, look back 10 minutes
+// Same logic as brute_force in my Python log analyzer
+// (github.com/Cyril-419/Security-Log-Analyzer)
+// =====================================================================
+let failureThreshold = 10;          // failed logons from one IP...
+let windowSize = 5m;                // ...inside this window
+SecurityEvent
+| where TimeGenerated > ago(10m)
+| where EventID == 4625                             // An account failed to log on
+| where isnotempty(IpAddress)
+    and IpAddress !in ("-", "127.0.0.1", "::1")     // ignore local logons
+| summarize
+    FailedAttempts   = count(),
+    DistinctAccounts = dcount(TargetUserName),
+    AccountsTried    = make_set(TargetUserName, 25),
+    FirstSeen        = min(TimeGenerated),
+    LastSeen         = max(TimeGenerated)
+    by IpAddress, Computer, bin(TimeGenerated, windowSize)
+| where FailedAttempts >= failureThreshold
+| extend Geo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(Geo.country), City = tostring(Geo.city)
+| project FirstSeen, LastSeen, IpAddress, Country, City, Computer,
+          FailedAttempts, DistinctAccounts, AccountsTried
+| order by FailedAttempts desc

@@ -1,0 +1,106 @@
+// =====================================================================
+// Hunting queries - run these in Advanced hunting (Defender portal) or
+// Logs (Log Analytics). Each block is separate: highlight one and run it.
+// Change the ago() value to cover however long the honeypot ran.
+// =====================================================================
+
+
+// ---- 1. Overview: how much was the honeypot attacked? --------------
+SecurityEvent
+| where TimeGenerated > ago(3d)
+| where EventID == 4625
+| where IpAddress !in ("-", "", "127.0.0.1", "::1")
+| summarize
+    FailedLogons    = count(),
+    UniqueAttackers = dcount(IpAddress),
+    UniqueUsernames = dcount(TargetUserName),
+    FirstAttack     = min(TimeGenerated),
+    LastAttack      = max(TimeGenerated)
+
+
+// ---- 2. Time to first attack after the VM went online ---------------
+// Replace the datetime with when you opened port 3389.
+let exposedAt = datetime(2026-11-16 18:00:00);
+SecurityEvent
+| where TimeGenerated > exposedAt
+| where EventID == 4625 and IpAddress !in ("-", "", "127.0.0.1", "::1")
+| summarize FirstAttack = min(TimeGenerated)
+| extend MinutesUntilFirstAttack = datetime_diff('minute', FirstAttack, exposedAt)
+
+
+// ---- 3. Top attacking IPs with location -----------------------------
+SecurityEvent
+| where TimeGenerated > ago(3d)
+| where EventID == 4625 and IpAddress !in ("-", "", "127.0.0.1", "::1")
+| summarize Attempts = count(), Usernames = dcount(TargetUserName) by IpAddress
+| extend Geo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(Geo.country), City = tostring(Geo.city)
+| top 20 by Attempts
+
+
+// ---- 4. Attacks by country ------------------------------------------
+SecurityEvent
+| where TimeGenerated > ago(3d)
+| where EventID == 4625 and IpAddress !in ("-", "", "127.0.0.1", "::1")
+| extend Country = tostring(geo_info_from_ip_address(IpAddress).country)
+| summarize Attempts = count(), Attackers = dcount(IpAddress) by Country
+| order by Attempts desc
+| render barchart
+
+
+// ---- 5. Most-tried usernames (what attackers guess first) -----------
+SecurityEvent
+| where TimeGenerated > ago(3d)
+| where EventID == 4625 and IpAddress !in ("-", "", "127.0.0.1", "::1")
+| summarize Attempts = count(), Attackers = dcount(IpAddress) by TargetUserName
+| top 25 by Attempts
+
+
+// ---- 6. Attack volume over time --------------------------------------
+SecurityEvent
+| where TimeGenerated > ago(3d)
+| where EventID == 4625 and IpAddress !in ("-", "", "127.0.0.1", "::1")
+| summarize Attempts = count() by bin(TimeGenerated, 1h)
+| render timechart
+
+
+// ---- 7. Why logons failed (4625 SubStatus codes) ---------------------
+// 0xC0000064 = username doesn't exist, 0xC000006A = right user, wrong password
+SecurityEvent
+| where TimeGenerated > ago(3d)
+| where EventID == 4625 and IpAddress !in ("-", "", "127.0.0.1", "::1")
+| extend Reason = case(
+    SubStatus =~ "0xc0000064", "Username does not exist",
+    SubStatus =~ "0xc000006a", "Correct username, wrong password",
+    SubStatus =~ "0xc0000234", "Account locked out",
+    SubStatus =~ "0xc0000072", "Account disabled",
+    strcat("Other (", SubStatus, ")"))
+| summarize Attempts = count() by Reason
+| order by Attempts desc
+
+
+// ---- 8. Did anyone get in? Every successful remote logon -------------
+// You should only see YOUR OWN IP here. Anything else is an incident.
+SecurityEvent
+| where TimeGenerated > ago(3d)
+| where EventID == 4624 and LogonType in (3, 10)
+| where IpAddress !in ("-", "", "127.0.0.1", "::1")
+| extend Country = tostring(geo_info_from_ip_address(IpAddress).country)
+| project TimeGenerated, IpAddress, Country, TargetUserName, LogonType
+| order by TimeGenerated desc
+
+
+// ---- 9. Export for the Python log analyzer ---------------------------
+// Columns match the analyzer's Windows format. Export the results as CSV,
+// then run scripts/sentinel_to_analyzer.py on the file (see README).
+SecurityEvent
+| where TimeGenerated > ago(3d)
+| where EventID in (4624, 4625)
+| project
+    TimeCreated    = format_datetime(TimeGenerated, "yyyy-MM-ddTHH:mm:ss.fffffff"),
+    EventID,
+    Computer,
+    TargetUserName,
+    IpAddress,
+    LogonType = tostring(LogonType)
+| order by TimeCreated asc
